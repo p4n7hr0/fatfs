@@ -433,21 +433,24 @@ fatdir_increment_loc(fatdir_t *fatdir)
 
 			/* TODO: check error (INVALID_CLUSTER) */
 
-			fatdir->loc.by_clus.cluster_counter++;
-			fatdir->loc.by_clus.current_cluster = next_cluster;
-			fatdir->loc.by_clus.cluster_offset = 0;
-
-			/* try to identify loop in the cluster chain */
-			if (fatdir->loc.by_clus.saved_cluster == (uint32_t) next_cluster)
-				fatdir->no_more_entries = 1;
-			if (fatdir->loc.by_clus.cluster_counter == fatdir->fatfs->num_total_clusters)
-				fatdir->no_more_entries = 1;
-			if (fatdir->loc.by_clus.cluster_counter == CLUSTER_CHAIN_THRESHOLD)
-				fatdir->loc.by_clus.saved_cluster = next_cluster;
-
 			/* if end-of-file, set end mark */
 			if (next_cluster == fatdir->fatfs->end_of_file_value)
 				fatdir->no_more_entries = 1;
+
+			else {
+				/* update position */
+				fatdir->loc.by_clus.cluster_counter++;
+				fatdir->loc.by_clus.current_cluster = next_cluster;
+				fatdir->loc.by_clus.cluster_offset = 0;
+
+				/* try to identify loop in the cluster chain */
+				if (fatdir->loc.by_clus.saved_cluster == (uint32_t) next_cluster)
+					fatdir->no_more_entries = 1;
+				if (fatdir->loc.by_clus.cluster_counter == fatdir->fatfs->num_total_clusters)
+					fatdir->no_more_entries = 1;
+				if (fatdir->loc.by_clus.cluster_counter == CLUSTER_CHAIN_THRESHOLD)
+					fatdir->loc.by_clus.saved_cluster = next_cluster;
+			}
 		}
 
 	} else {
@@ -467,13 +470,16 @@ fatfile_increment_cluster(fatfile_t *fatfile)
 
 		/* TODO: check error (INVALID_CLUSTER) */
 
-		fatfile->cluster_counter++;
-		fatfile->current_cluster = next_cluster;
-		fatfile->cluster_offset = 0;
-
 		/* if end-of-file, set end mark */
 		if (next_cluster == fatfile->fatfs->end_of_file_value)
 			fatfile->no_more_bytes = 1;
+
+		else {
+			/* update position */
+			fatfile->cluster_counter++;
+			fatfile->current_cluster = next_cluster;
+			fatfile->cluster_offset = 0;
+		}
 	}
 }
 
