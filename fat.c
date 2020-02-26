@@ -413,8 +413,8 @@ static inline off_t
 fatfile_offset(fatfile_t *fatfile)
 {
 	return ((fatfile->cluster_counter *
-			fatfile->fatfs->sectors_per_cluster *
-			fatfile->fatfs->bytes_per_sector) + fatfile->cluster_offset);
+	fatfile->fatfs->sectors_per_cluster *
+	fatfile->fatfs->bytes_per_sector) + fatfile->cluster_offset);
 }
 
 static void
