@@ -84,10 +84,10 @@ fat_read(fatfile_t *fatfile, void *buf, size_t nbyte);
 /*
 ssize_t
 fat_write(fatfile_t *fatfile, void *buf, size_t nbyte);
-
+*/
 off_t
 fat_seek(fatfile_t *fatfile, off_t offset, int whence);
-*/
+
 void
 fat_close(fatfile_t *fatfile);
 

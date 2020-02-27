@@ -412,9 +412,9 @@ fatfile_data_offset(fatfile_t *fatfile)
 static inline off_t
 fatfile_offset(fatfile_t *fatfile)
 {
-	return ((fatfile->cluster_counter *
-	fatfile->fatfs->sectors_per_cluster *
-	fatfile->fatfs->bytes_per_sector) + fatfile->cluster_offset);
+	return ((fatfile->cluster_counter
+	* fatfile->fatfs->sectors_per_cluster
+	* fatfile->fatfs->bytes_per_sector) + fatfile->cluster_offset);
 }
 
 static void
@@ -875,26 +875,64 @@ fat_write(fatfile_t *fatfile, void *buf, size_t nbyte)
 {
 	return 0;
 }
-
+*/
 
 off_t
 fat_seek(fatfile_t *fatfile, off_t offset, int whence)
 {
+	off_t old_off;
+	uint32_t size_of_cluster;
+
 	if (!fatfile)
 		return -1;
 
-	if (whence == FAT_SEEK_CUR)
-		fat_seek(fatfile, fatfile_offset(fatfile) + offset, FAT_SEEK_SET);
-	else if (whence == FAT_SEEK_END)
-		fat_seek(fatfile, fatfile->filesize + offset, FAT_SEEK_SET);
-	else if (whence != FAT_SEEK_SET)
+	/* handle negative offset */
+	if (offset < 0) {
+		if (whence == FAT_SEEK_SET)
+			return -1;
+		else if (whence == FAT_SEEK_END)
+			return fat_seek(fatfile, (off_t)fatfile->filesize + offset,
+				FAT_SEEK_SET);
+		else if (whence == FAT_SEEK_CUR)
+			return fat_seek(fatfile, fatfile_offset(fatfile) + offset,
+				FAT_SEEK_SET);
+		else
+			return -1;
+	}
+
+	/* handle positive offset */
+	if (whence == FAT_SEEK_SET) {
+		fatfile->current_cluster = fatfile->first_cluster;
+		fatfile->cluster_offset = 0;
+		fatfile->cluster_counter = 0;
+		fatfile->no_more_bytes = 0;
+
+	} else if (whence == FAT_SEEK_END) {
+		offset += fatfile->filesize - fatfile_offset(fatfile);
+		/* if file pointer is beyond end-of-file and beyond the new offset */
+		if (offset < 0)
+			return fat_seek(fatfile, offset, FAT_SEEK_CUR);
+
+	} else if (whence != FAT_SEEK_CUR)
 		return -1;
 
-	// seek_set
+	old_off = fatfile_offset(fatfile);
+	size_of_cluster = fatfile->fatfs->sectors_per_cluster
+		* fatfile->fatfs->bytes_per_sector;
 
+	/* adjust cluster */
+	for (off_t i = 0; i < (offset / size_of_cluster); i++) {
+		if (fatfile_offset(fatfile) >= fatfile->filesize)
+			break;
+
+		fatfile_increment_cluster(fatfile);
+	}
+
+	/* adjust offset */
+	fatfile->cluster_offset += offset - (fatfile_offset(fatfile) - old_off);
 	return fatfile_offset(fatfile);
 }
-*/
+
 void
 fat_close(fatfile_t *fatfile)
 {
