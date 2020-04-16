@@ -41,12 +41,10 @@ typedef struct fat_file fatfile_t;
 #define FAT_SEEK_CUR       2
 
 #define SHORT_NAME_SIZE    13
-#define LONG_NAME_SIZE     256
 
 /* fat directory entry */
 struct fat_dir_entry {
 	char     short_name[SHORT_NAME_SIZE];
-	wchar_t  long_name[LONG_NAME_SIZE];
 	uint32_t cluster;
 	uint32_t attr;
 	uint32_t size;

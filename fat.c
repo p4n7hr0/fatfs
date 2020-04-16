@@ -513,55 +513,6 @@ fatdir_clean_last_entry(fatdir_t *fatdir)
 	memset(&fatdir->last_entry, 0, sizeof(fatdir->last_entry));
 }
 
-static inline size_t
-fatdir_last_entry_ln_cnt_lz(fatdir_t *fatdir)
-{
-	size_t ln_cnt_lz = 0;
-	/* count leading zeros in fatdir->last_entry.long_name */
-	for (size_t i = 0; i < LONG_NAME_SIZE - 1; i++) {
-		if (fatdir->last_entry.long_name[i] == 0x00)
-			ln_cnt_lz += 1;
-		else
-			break;
-	}
-
-	return ln_cnt_lz;
-}
-
-static inline size_t
-fat_ln_strnlen(uint16_t *s, size_t max)
-{
-	size_t n = 0;
-	for (size_t i = 0; i < max; i++) {
-		if ((s[i] != 0) && (s[i] != 0xffff))
-			n++;
-
-		else break;
-	}
-
-	return n;
-}
-
-static void
-fatdir_append_long_name(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
-{
-	size_t wsz_name, ln_start_index = fatdir_last_entry_ln_cnt_lz(fatdir);
-	wsz_name = fat_ln_strnlen((uint16_t *)priv_fat_dir->type.ln.name3, 2);
-	ln_start_index -= wsz_name;
-	for (size_t i = 0, j = ln_start_index; i < wsz_name * 2; i += 2, j++)
-		fatdir->last_entry.long_name[j] = (wchar_t) priv_fat_dir->type.ln.name3[i];
-
-	wsz_name = fat_ln_strnlen((uint16_t *)priv_fat_dir->type.ln.name2, 6);
-	ln_start_index -= wsz_name;
-	for (size_t i = 0, j = ln_start_index; i < wsz_name * 2; i += 2, j++)
-		fatdir->last_entry.long_name[j] = (wchar_t) priv_fat_dir->type.ln.name2[i];
-
-	wsz_name = fat_ln_strnlen((uint16_t *)priv_fat_dir->type.ln.name1, 5);
-	ln_start_index -= wsz_name;
-	for (size_t i = 0, j = ln_start_index; i < wsz_name * 2; i += 2, j++)
-		fatdir->last_entry.long_name[j] = (wchar_t) priv_fat_dir->type.ln.name1[i];
-}
-
 static void
 fatdir_set_last_entry(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
 {
@@ -592,13 +543,6 @@ fatdir_set_last_entry(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
 	fatdir->last_entry.size = priv_fat_dir->type.gen.file_size;
 	fatdir->last_entry.cluster = (priv_fat_dir->type.gen.first_cluster_high << 16)
 		| priv_fat_dir->type.gen.first_cluster_low;
-
-	/* adjust long name */
-	size_t ln_start_index = fatdir_last_entry_ln_cnt_lz(fatdir);
-	wchar_t *dst_ptr = &fatdir->last_entry.long_name[0];
-	wchar_t *src_ptr = &fatdir->last_entry.long_name[ln_start_index];
-	for (size_t i = 0; i < (LONG_NAME_SIZE - ln_start_index); i++)
-		dst_ptr[i] = src_ptr[i];
 }
 
 fatfs_t *
@@ -735,7 +679,7 @@ fat_readdir(fatdir_t *fatdir)
 			return NULL;
 		/* long name */
 		else if (priv_fat_dir.type.gen.attr == FAT_ATTR_LONG_NAME)
-			fatdir_append_long_name(fatdir, &priv_fat_dir);
+			continue;
 		/* volume id */
 		else if (priv_fat_dir.type.gen.attr == FAT_ATTR_VOLUME_ID)
 			continue;

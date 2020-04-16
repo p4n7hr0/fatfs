@@ -47,6 +47,7 @@ do_list_files(fatdir_t *fatdir, std::string &strdir, std::wstring &wstrdir)
 		/* print short name */
 		std::cout << strdir << "/" << dptr->short_name;
 
+#if 0
 		/* print long name */
 		if (dptr->long_name[0] != 0x00) {
 			std::cout << std::endl;
@@ -57,7 +58,7 @@ do_list_files(fatdir_t *fatdir, std::string &strdir, std::wstring &wstrdir)
 				std::cout << strdir << "/";
 			std::wcout << dptr->long_name << " (long filename)" << std::endl;
 		}
-
+#endif
 		std::cout << std::endl;
 
 		/* print dir */
@@ -67,8 +68,8 @@ do_list_files(fatdir_t *fatdir, std::string &strdir, std::wstring &wstrdir)
 				std::string strdir2 = strdir + "/" + dptr->short_name;
 				std::wstring wstrdir2;
 
-				if (dptr->long_name[0] != 0x00)
-					wstrdir2 = wstrdir + L"/" + dptr->long_name;
+				//if (dptr->long_name[0] != 0x00)
+				//	wstrdir2 = wstrdir + L"/" + dptr->long_name;
 
 				do_list_files(fatdir2, strdir2, wstrdir2);
 				fat_closedir(fatdir2);
