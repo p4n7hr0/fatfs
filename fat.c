@@ -364,7 +364,7 @@ fatfs_parse_bpb(fatfs_t *fatfs)
 		/* set first cluster of root dir */
 		fatfs->root_dir_cluster = bpb.specific.fat_32.root_cluster;
 		if (bpb.specific.fat_32.extended_flags & 0x80) {
-			if ((bpb.specific.fat_32.extended_flags & 0xf) > bpb.num_fats)
+			if ((bpb.specific.fat_32.extended_flags & 0xf) >= bpb.num_fats)
 				return -1;
 			/* adjust offset */
 			fatfs->fat_off += fatfs->fat_size *
