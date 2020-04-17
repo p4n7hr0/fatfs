@@ -19,8 +19,6 @@
 #include <string.h>
 #include <limits.h>
 
-/* used as a helper to detect a cyclic fat chain */
-#define CLUSTER_CHAIN_THRESHOLD 512
 
 /* invalid cluster value */
 #define INVALID_CLUSTER 0xffffffff
@@ -37,7 +35,7 @@
 struct fat_fs {
 	FILE *stream;
 	off_t offset;
-	char name[6], label[12];
+	char type[6], label[12];
 	uint32_t fat_off;
 	uint32_t fat_size;
 	uint32_t root_dir_off;
@@ -63,10 +61,6 @@ struct fat_dir {
 			uint32_t first_cluster;
 			uint32_t current_cluster;
 			uint32_t cluster_offset;
-
-			/* used to identify loop in the cluster chain */
-			uint32_t cluster_counter;
-			uint32_t saved_cluster;
 		} by_clus;
 
 		struct  {
@@ -273,7 +267,7 @@ set_label(fatfs_t *fatfs, void *label)
 	fatfs->label[sizeof(fatfs->label)-1] = '\0';
 }
 
-static int
+static int32_t
 fatfs_parse_bpb(fatfs_t *fatfs)
 {
 	struct fat_bpb bpb;
@@ -343,21 +337,21 @@ fatfs_parse_bpb(fatfs_t *fatfs)
 	/* fat type */
 	if (fatfs->num_total_clusters < 4085) {
 		set_label(fatfs, &bpb.specific.fat_12_16.label[0]);
-		strncpy(fatfs->name, "FAT12", sizeof(fatfs->name));
+		strncpy(fatfs->type, "FAT12", sizeof(fatfs->type));
 		fatfs->read_fat_entry = fatfs_read_fat12;
 		fatfs->end_of_file_value = 0xfff;
 		fatfs->bad_cluster_value = 0xff7;
 
 	} else if (fatfs->num_total_clusters < 65525) {
 		set_label(fatfs, &bpb.specific.fat_12_16.label[0]);
-		strncpy(fatfs->name, "FAT16", sizeof(fatfs->name));
+		strncpy(fatfs->type, "FAT16", sizeof(fatfs->type));
 		fatfs->read_fat_entry = fatfs_read_fat16;
 		fatfs->end_of_file_value = 0xffff;
 		fatfs->bad_cluster_value = 0xfff7;
 
 	} else {
 		set_label(fatfs, &bpb.specific.fat_32.label[0]);
-		strncpy(fatfs->name, "FAT32", sizeof(fatfs->name));
+		strncpy(fatfs->type, "FAT32", sizeof(fatfs->type));
 		fatfs->read_fat_entry = fatfs_read_fat32;
 		fatfs->end_of_file_value = 0x0fffffff;
 		fatfs->bad_cluster_value = 0x0ffffff7;
@@ -375,7 +369,7 @@ fatfs_parse_bpb(fatfs_t *fatfs)
 	return 0;
 }
 
-static inline int
+static inline int32_t
 fatdir_loc_by_clus(fatdir_t *fatdir)
 {
 	return (fatdir->loc.by_clus.first_cluster != INVALID_CLUSTER);
@@ -417,7 +411,32 @@ fatfile_offset(fatfile_t *fatfile)
 	* fatfile->fatfs->bytes_per_sector) + fatfile->cluster_offset);
 }
 
-static void
+static int32_t
+fatdir_increment_cluster(fatdir_t *fatdir)
+{
+	if (fatdir_loc_by_clus(fatdir)) {
+		int32_t curr_cluster = fatdir->loc.by_clus.current_cluster;
+		int32_t next_cluster = fatdir->fatfs->read_fat_entry(fatdir->fatfs,
+			curr_cluster);
+
+		/* if error, return */
+		if (next_cluster < 0)
+			return next_cluster;
+
+		/* if end-of-file, set end mark */
+		if (next_cluster == fatdir->fatfs->end_of_file_value)
+			fatdir->no_more_entries = 1;
+
+		else {
+			fatdir->loc.by_clus.current_cluster = next_cluster;
+			fatdir->loc.by_clus.cluster_offset = 0;
+		}
+	}
+
+	return 0;
+}
+
+static int32_t
 fatdir_increment_loc(fatdir_t *fatdir)
 {
 	if (fatdir_loc_by_clus(fatdir)) {
@@ -425,42 +444,20 @@ fatdir_increment_loc(fatdir_t *fatdir)
 			* fatdir->fatfs->bytes_per_sector);
 		fatdir->loc.by_clus.cluster_offset += 32;
 
-		/* if cluster end, read next cluster from fat */
-		if (fatdir->loc.by_clus.cluster_offset == max_cluster_off) {
-			int32_t curr_cluster = fatdir->loc.by_clus.current_cluster;
-			int32_t next_cluster = fatdir->fatfs->read_fat_entry(fatdir->fatfs,
-				curr_cluster);
-
-			/* TODO: check error (INVALID_CLUSTER) */
-
-			/* if end-of-file, set end mark */
-			if (next_cluster == fatdir->fatfs->end_of_file_value)
-				fatdir->no_more_entries = 1;
-
-			else {
-				/* update position */
-				fatdir->loc.by_clus.cluster_counter++;
-				fatdir->loc.by_clus.current_cluster = next_cluster;
-				fatdir->loc.by_clus.cluster_offset = 0;
-
-				/* try to identify loop in the cluster chain */
-				if (fatdir->loc.by_clus.saved_cluster == (uint32_t) next_cluster)
-					fatdir->no_more_entries = 1;
-				if (fatdir->loc.by_clus.cluster_counter == fatdir->fatfs->num_total_clusters)
-					fatdir->no_more_entries = 1;
-				if (fatdir->loc.by_clus.cluster_counter == CLUSTER_CHAIN_THRESHOLD)
-					fatdir->loc.by_clus.saved_cluster = next_cluster;
-			}
-		}
+		/* if cluster end, load next from fat */
+		if (fatdir->loc.by_clus.cluster_offset == max_cluster_off)
+			return fatdir_increment_cluster(fatdir);
 
 	} else {
 		fatdir->loc.by_off.current_offset += 32;
 		if (fatdir->loc.by_off.current_offset == fatdir->loc.by_off.end_offset)
 			fatdir->no_more_entries = 1;
 	}
+
+	return 0;
 }
 
-static void
+static int32_t
 fatfile_increment_cluster(fatfile_t *fatfile)
 {
 	if (fatfile_offset(fatfile) < fatfile->filesize) {
@@ -468,7 +465,9 @@ fatfile_increment_cluster(fatfile_t *fatfile)
 		int32_t next_cluster = fatfile->fatfs->read_fat_entry(fatfile->fatfs,
 			curr_cluster);
 
-		/* TODO: check error (INVALID_CLUSTER) */
+		/* if error, return */
+		if (next_cluster < 0)
+			return next_cluster;
 
 		/* if end-of-file, set end mark */
 		if (next_cluster == fatfile->fatfs->end_of_file_value)
@@ -481,9 +480,11 @@ fatfile_increment_cluster(fatfile_t *fatfile)
 			fatfile->cluster_offset = 0;
 		}
 	}
+
+	return 0;
 }
 
-static int
+static int32_t
 fatdir_read_priv_fat_dir(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
 {
 	/* check end flag */
@@ -503,8 +504,7 @@ fatdir_read_priv_fat_dir(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
 	}
 
 	/* increment location */
-	fatdir_increment_loc(fatdir);
-	return 0;
+	return fatdir_increment_loc(fatdir);
 }
 
 static inline void
@@ -543,6 +543,62 @@ fatdir_set_last_entry(fatdir_t *fatdir, struct priv_fat_dir *priv_fat_dir)
 	fatdir->last_entry.size = priv_fat_dir->type.gen.file_size;
 	fatdir->last_entry.cluster = (priv_fat_dir->type.gen.first_cluster_high << 16)
 		| priv_fat_dir->type.gen.first_cluster_low;
+}
+
+static void
+fatdir_set_copy(fatdir_t *dst, fatdir_t *src)
+{
+	dst->fatfs = src->fatfs;
+	dst->loc = src->loc;
+	dst->no_more_entries = src->no_more_entries;
+	dst->last_entry = src->last_entry;
+}
+
+static void
+fatfile_set_copy(fatfile_t *dst, fatfile_t *src)
+{
+	dst->fatfs = src->fatfs;
+	dst->first_cluster = src->first_cluster;
+	dst->current_cluster = src->current_cluster;
+	dst->cluster_offset = src->cluster_offset;
+	dst->filesize = src->filesize;
+	dst->cluster_counter = src->cluster_counter;
+	dst->no_more_bytes = src->no_more_bytes;
+}
+
+static int32_t
+fatdir_detect_cyclic_fat(fatdir_t *fatdir)
+{
+	fatdir_t dircopy;
+	uint32_t saved_cluster = 0;
+
+	if (!fatdir || !fatdir_loc_by_clus(fatdir))
+		return 0;
+
+	fatdir_set_copy(&dircopy, fatdir);
+	fat_rewinddir(&dircopy);
+
+	/* follow every cluster number in the FAT chain */
+	for (uint32_t i = 0; i <= dircopy.fatfs->num_total_clusters; i++) {
+		/* if some cluster number repeat, this is a cyclic chain */
+		if (dircopy.loc.by_clus.current_cluster == saved_cluster)
+			return 1;
+
+		/* from time to time save the current cluster */
+		if (!(i & 0xff))
+			saved_cluster = dircopy.loc.by_clus.current_cluster;
+
+		/* if error, return */
+		if (fatdir_increment_cluster(&dircopy))
+			return 0;
+
+		/* end-of-file found */
+		if (dircopy.no_more_entries)
+			return 0;
+	}
+
+	/* no end-of-file means cyclic chain */
+	return 1;
 }
 
 fatfs_t *
@@ -611,8 +667,6 @@ fat_getroot(fatfs_t *fatfs)
 		rootdir->loc.by_clus.first_cluster = fatfs->root_dir_cluster;
 		rootdir->loc.by_clus.current_cluster = fatfs->root_dir_cluster;
 		rootdir->loc.by_clus.cluster_offset = 0;
-		rootdir->loc.by_clus.cluster_counter = 0;
-		rootdir->loc.by_clus.saved_cluster = 0;
 	/* fat12 or fat16 */
 	} else {
 		rootdir->loc.by_off.reserved = INVALID_CLUSTER;
@@ -620,6 +674,12 @@ fat_getroot(fatfs_t *fatfs)
 		rootdir->loc.by_off.current_offset = fatfs->root_dir_off;
 		rootdir->loc.by_off.end_offset = fatfs->root_dir_off
 			+ fatfs->root_dir_size;
+	}
+
+	/* check fat chain */
+	if (fatdir_detect_cyclic_fat(rootdir)) {
+		fat_closedir(rootdir);
+		rootdir = NULL;
 	}
 
 	return rootdir;
@@ -634,10 +694,7 @@ fat_opendir(fatdir_t *fatdir, const char *name)
 		return NULL;
 
 	/* copy dir */
-	dircopy.fatfs = fatdir->fatfs;
-	dircopy.loc = fatdir->loc;
-	dircopy.no_more_entries = fatdir->no_more_entries;
-	dircopy.last_entry = fatdir->last_entry;
+	fatdir_set_copy(&dircopy, fatdir);
 	fat_rewinddir(&dircopy);
 
 	do {
@@ -651,12 +708,16 @@ fat_opendir(fatdir_t *fatdir, const char *name)
 			d->loc.by_clus.first_cluster = dircopy.last_entry.cluster;
 			d->loc.by_clus.current_cluster = dircopy.last_entry.cluster;
 			d->loc.by_clus.cluster_offset = 0;
-			d->loc.by_clus.cluster_counter = 0;
-			d->loc.by_clus.saved_cluster = 0;
 			break;
 		}
 
 	} while (fat_readdir(&dircopy));
+
+	/* check fat chain */
+	if (fatdir_detect_cyclic_fat(d)) {
+		fat_closedir(d);
+		d = NULL;
+	}
 
 	return d;
 }
@@ -677,14 +738,22 @@ fat_readdir(fatdir_t *fatdir)
 		/* if error, ret */
 		if (fatdir_read_priv_fat_dir(fatdir, &priv_fat_dir))
 			return NULL;
-		/* long name */
+
+		/* skip released entry */
+		else if (priv_fat_dir.type.gen.name[0] == 0xe5)
+			continue;
+
+		/* TODO: support long names */
 		else if (priv_fat_dir.type.gen.attr == FAT_ATTR_LONG_NAME)
 			continue;
-		/* volume id */
+
+		/* TODO: support volume id */
 		else if (priv_fat_dir.type.gen.attr == FAT_ATTR_VOLUME_ID)
 			continue;
+
 		/* file, dir */
-		else
+		else if ((priv_fat_dir.type.gen.attr & FAT_ATTR_ARCHIVE)
+			|| (priv_fat_dir.type.gen.attr & FAT_ATTR_DIRECTORY))
 			break;
 	}
 
@@ -702,8 +771,6 @@ fat_rewinddir(fatdir_t *fatdir)
 		if (fatdir_loc_by_clus(fatdir)) {
 			fatdir->loc.by_clus.current_cluster = fatdir->loc.by_clus.first_cluster;
 			fatdir->loc.by_clus.cluster_offset = 0;
-			fatdir->loc.by_clus.cluster_counter = 0;
-			fatdir->loc.by_clus.saved_cluster = 0;
 		/* by_off */
 		} else {
 			fatdir->loc.by_off.current_offset = fatdir->loc.by_off.start_offset;
@@ -728,10 +795,7 @@ fat_open(fatdir_t *fatdir, const char *filename)
 		return NULL;
 
 	/* copy dir */
-	dircopy.fatfs = fatdir->fatfs;
-	dircopy.loc = fatdir->loc;
-	dircopy.no_more_entries = fatdir->no_more_entries;
-	dircopy.last_entry = fatdir->last_entry;
+	fatdir_set_copy(&dircopy, fatdir);
 	fat_rewinddir(&dircopy);
 
 	do {
@@ -778,7 +842,8 @@ fat_read(fatfile_t *fatfile, void *buf, size_t nbyte)
 	while ((total_read < (ssize_t) nbyte)
 		&& (fatfile_offset(fatfile) < fatfile->filesize)) {
 
-		/* useful if there is more bytes than clusters */
+		/* useful if, in a invalid volume,
+		   there are more bytes than clusters */
 		if (fatfile->no_more_bytes)
 			break;
 
@@ -787,11 +852,11 @@ fat_read(fatfile_t *fatfile, void *buf, size_t nbyte)
 		if (slice_size > (nbyte - total_read))
 			slice_size = (nbyte - total_read);
 		/* avoid read beyond file size */
-		if((fatfile_offset(fatfile) + slice_size) > fatfile->filesize)
+		if ((fatfile_offset(fatfile) + slice_size) > fatfile->filesize)
 			slice_size = fatfile->filesize - fatfile_offset(fatfile);
 
 		/* adjust offset */
-		if(fatfs_seek(fatfile->fatfs, fatfile_data_offset(fatfile), SEEK_SET))
+		if (fatfs_seek(fatfile->fatfs, fatfile_data_offset(fatfile), SEEK_SET))
 			break;
 
 		/* read bytes */
@@ -807,7 +872,9 @@ fat_read(fatfile_t *fatfile, void *buf, size_t nbyte)
 
 		/* if cluster end, load next */
 		if (fatfile->cluster_offset == max_cluster_off)
-			fatfile_increment_cluster(fatfile);
+			/* if err, break */
+			if (fatfile_increment_cluster(fatfile))
+				break;
 	}
 
 	return total_read;
@@ -821,60 +888,101 @@ fat_write(fatfile_t *fatfile, void *buf, size_t nbyte)
 }
 */
 
-off_t
-fat_seek(fatfile_t *fatfile, off_t offset, int whence)
+static off_t
+fat_seek_cur(fatfile_t *fatfile, off_t offset)
 {
-	off_t old_off;
-	uint32_t size_of_cluster;
-
-	if (!fatfile)
-		return -1;
-
-	/* handle negative offset */
-	if (offset < 0) {
-		if (whence == FAT_SEEK_SET)
-			return -1;
-		else if (whence == FAT_SEEK_END)
-			return fat_seek(fatfile, (off_t)fatfile->filesize + offset,
-				FAT_SEEK_SET);
-		else if (whence == FAT_SEEK_CUR)
-			return fat_seek(fatfile, fatfile_offset(fatfile) + offset,
-				FAT_SEEK_SET);
-		else
-			return -1;
-	}
-
-	/* handle positive offset */
-	if (whence == FAT_SEEK_SET) {
-		fatfile->current_cluster = fatfile->first_cluster;
-		fatfile->cluster_offset = 0;
-		fatfile->cluster_counter = 0;
-		fatfile->no_more_bytes = 0;
-
-	} else if (whence == FAT_SEEK_END) {
-		offset += fatfile->filesize - fatfile_offset(fatfile);
-		/* if file pointer is beyond end-of-file and beyond the new offset */
-		if (offset < 0)
-			return fat_seek(fatfile, offset, FAT_SEEK_CUR);
-
-	} else if (whence != FAT_SEEK_CUR)
-		return -1;
-
-	old_off = fatfile_offset(fatfile);
-	size_of_cluster = fatfile->fatfs->sectors_per_cluster
+	off_t old_off = fatfile_offset(fatfile);
+	uint32_t size_of_cluster = fatfile->fatfs->sectors_per_cluster
 		* fatfile->fatfs->bytes_per_sector;
+
+	/* copy file struct
+	   on error, the caller fatfile_t will remain the same */
+	fatfile_t filecopy;
+	fatfile_set_copy(&filecopy, fatfile);
 
 	/* adjust cluster */
 	for (off_t i = 0; i < (offset / size_of_cluster); i++) {
-		if (fatfile_offset(fatfile) >= fatfile->filesize)
+
+		/* seek will not allocate clusters,
+		   so all beyond-end-of-file size will
+		   remain on fatfile->cluster_offset
+
+		   the function fat_write should take care of this
+		   and allocate clusters if necessary
+		*/
+		if (fatfile_offset(&filecopy) >= filecopy.filesize)
 			break;
 
-		fatfile_increment_cluster(fatfile);
+		/* error, return */
+		if (fatfile_increment_cluster(&filecopy))
+			return -1;
 	}
 
 	/* adjust offset */
-	fatfile->cluster_offset += offset - (fatfile_offset(fatfile) - old_off);
+	filecopy.cluster_offset += offset - (fatfile_offset(&filecopy) - old_off);
+	/* set caller fatfile_t */
+	fatfile_set_copy(fatfile, &filecopy);
 	return fatfile_offset(fatfile);
+}
+
+static off_t
+fat_seek_set(fatfile_t *fatfile, off_t offset)
+{
+	/* negative FAT_SEEK_SET is not allowed */
+	if (offset < 0)
+		return -1;
+
+	fatfile->current_cluster = fatfile->first_cluster;
+	fatfile->cluster_offset = 0;
+	fatfile->cluster_counter = 0;
+	fatfile->no_more_bytes = 0;
+	return fat_seek_cur(fatfile, offset);
+}
+
+static off_t
+fat_negative_seek(fatfile_t *fatfile, off_t offset, int whence)
+{
+	if (whence == FAT_SEEK_END)
+		return fat_seek_set(fatfile, (off_t)fatfile->filesize + offset);
+	else if (whence == FAT_SEEK_CUR)
+		return fat_seek_set(fatfile, fatfile_offset(fatfile) + offset);
+
+	/* negative FAT_SEEK_SET is not allowed */
+	return -1;
+}
+
+static off_t
+fat_seek_end(fatfile_t *fatfile, off_t offset)
+{
+	offset += fatfile->filesize - fatfile_offset(fatfile);
+
+	/* if current file pointer is beyond the target offset */
+	if (offset < 0)
+		return fat_negative_seek(fatfile, offset, FAT_SEEK_CUR);
+
+	return fat_seek_cur(fatfile, offset);
+}
+
+off_t
+fat_seek(fatfile_t *fatfile, off_t offset, int whence)
+{
+	/* check */
+	if (!fatfile)
+		return -1;
+
+	/* negative offset */
+	if (offset < 0)
+		return fat_negative_seek(fatfile, offset, whence);
+
+	/* positive offset */
+	if (whence == FAT_SEEK_SET)
+		return fat_seek_set(fatfile, offset);
+	if (whence == FAT_SEEK_END)
+		return fat_seek_end(fatfile, offset);
+	if (whence != FAT_SEEK_CUR)
+		return -1;
+
+	return fat_seek_cur(fatfile, offset);
 }
 
 void
