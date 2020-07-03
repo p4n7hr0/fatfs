@@ -1,6 +1,23 @@
+
+# binaries
 *.bin
 *.d
 *.o
-readfat
-seekfile
 
+# targets
+fat_fopen_t
+fat_fread_t
+fat_fseek_t
+fat_fwrite_t
+fat_mkdir_t
+fat_mount_t
+fat_opendir_t
+fat_readdir_t
+fat_rmdir_t
+fat_seekdir_t
+fat_truncate_t
+fat_unlink_t
+parsefat
+
+# others
+.DS_Store
