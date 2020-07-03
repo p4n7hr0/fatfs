@@ -20,74 +20,117 @@
 extern "C" {
 #endif
 
+#include <wchar.h>
 #include <stdint.h>
-#include <stddef.h>
-#include <sys/types.h>
 
-/* opaque types */
-typedef struct fat_fs fatfs_t;
-typedef struct fat_dir fatdir_t;
-typedef struct fat_file fatfile_t;
+typedef int64_t fatoff_t;
+typedef int32_t fatclus_t;
 
-/* directory entry attributes */
-#define	FAT_ATTR_READ_ONLY 0x01
-#define	FAT_ATTR_HIDDEN    0x02
-#define	FAT_ATTR_SYSTEM    0x04
-#define	FAT_ATTR_DIRECTORY 0x10
-#define	FAT_ATTR_ARCHIVE   0x20
+typedef struct fatfs fatfs_t;
+typedef struct fatdir fatdir_t;
+typedef struct fatfile fatfile_t;
 
+/* seek pos */
 #define FAT_SEEK_SET       0
 #define FAT_SEEK_END       1
 #define FAT_SEEK_CUR       2
 
-#define SHORT_NAME_SIZE    13
+/* fatdirent type */
+#define	FAT_TYPE_DIRECTORY 1
+#define	FAT_TYPE_ARCHIVE   2
 
-/* fat directory entry */
-struct fat_dir_entry {
-	char     short_name[SHORT_NAME_SIZE];
-	uint32_t cluster;
-	uint32_t attr;
-	uint32_t size;
+/* max file name */
+#define FAT_MAX_NAME       260
+
+struct fatdirent {
+	fatoff_t      d_privoff;
+	fatclus_t     d_cluster;
+	fatoff_t      d_size;
+	unsigned char d_type;
+	wchar_t       d_name[FAT_MAX_NAME+1];
 };
 
-fatfs_t *
-fat_mount(const char *filename, off_t offset);
+/* errors */
+enum {
+	FAT_ERR_SUCCESS = 0,  /* success */
+	FAT_ERR_NOENT,        /* path does not exist */
+	FAT_ERR_INVAL,        /* invalid argument */
+	FAT_ERR_ENOMEM,       /* allocation error */
+	FAT_ERR_NOTFATFS,     /* invalid filesystem */
+	FAT_ERR_ACCESS,       /* fat_mount: access denied for filename */
+	FAT_ERR_DEVBUSY,      /* fat_mount: device is busy */
+	FAT_ERR_NOTDIR,       /* a component of the path is not a directory */
+	FAT_ERR_ISDIR,        /* path is a directory */
+	FAT_ERR_WRONLY,       /* write-only file */
+	FAT_ERR_RDONLY,       /* read-only file  */
+	FAT_ERR_MAXSIZE,      /* read/write size is above UINT_MAX */
+	FAT_ERR_FULLDISK,     /* disk is full */
+	FAT_ERR_IO,           /* I/O error */
+	FAT_ERR_NOTIMPL,      /* function is not implemented */
+};
+
+/* file system operations */
+int
+fat_mount(fatfs_t **ppfatfs, const char *filename, fatoff_t offset);
 
 void
-fat_umount(fatfs_t *fatfs);
+fat_umount(fatfs_t *pfatfs);
 
-const char *
-fat_getlabel(fatfs_t *fatfs);
+wchar_t *
+fat_getlabel(fatfs_t *pfatfs);
 
+int
+fat_error(fatfs_t *pfatfs);
+
+/* directory operations */
 fatdir_t *
-fat_getroot(fatfs_t *fatfs);
+fat_opendir(fatfs_t *pfatfs, const wchar_t *path);
 
-fatdir_t *
-fat_opendir(fatdir_t *fatdir, const char *name);
+struct fatdirent *
+fat_readdir(fatdir_t *pfatdir);
 
-struct fat_dir_entry *
-fat_readdir(fatdir_t *fatdir);
-
-void
-fat_rewinddir(fatdir_t *fatdir);
+long
+fat_telldir(fatdir_t *pfatdir);
 
 void
-fat_closedir(fatdir_t *fatdir);
+fat_seekdir(fatdir_t *pfatdir, long loc);
 
+void
+fat_rewinddir(fatdir_t *pfatdir);
+
+void
+fat_closedir(fatdir_t *pfatdir);
+
+int
+fat_mkdir(fatfs_t *pfatfs, const wchar_t *path);
+
+int
+fat_rmdir(fatfs_t *pfatfs, const wchar_t *path);
+
+/* file operations */
 fatfile_t *
-fat_open(fatdir_t *fatdir, const char *filename);
+fat_fopen(fatfs_t *pfatfs, const wchar_t *path, const char *mode);
 
-ssize_t
-fat_read(fatfile_t *fatfile, void *buf, size_t nbyte);
-/*
-ssize_t
-fat_write(fatfile_t *fatfile, void *buf, size_t nbyte);
-*/
-off_t
-fat_seek(fatfile_t *fatfile, off_t offset, int whence);
+size_t
+fat_fread(void *buf, size_t size, size_t nitems, fatfile_t *pfatfile);
+
+size_t
+fat_fwrite(void *buf, size_t size, size_t nitems, fatfile_t *pfatfile);
+
+int
+fat_fseek(fatfile_t *pfatfile, fatoff_t offset, int whence);
+
+fatoff_t
+fat_ftell(fatfile_t *pfatfile);
 
 void
-fat_close(fatfile_t *fatfile);
+fat_fclose(fatfile_t *pfatfile);
+
+int
+fat_truncate(fatfs_t *pfatfs, const wchar_t *filepath, fatoff_t length);
+
+int
+fat_unlink(fatfs_t *pfatfs, const wchar_t *path);
 
 #ifdef __cplusplus
 }
