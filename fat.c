@@ -813,10 +813,6 @@ fatdirent_read_from_block(fatfs_t *pfatfs, struct fatdirent *pdirent,
 			continue;
 		}
 
-		/* skip invalid */
-		if (check_cyclic_fat(pfatfs, first_cluster))
-			continue;
-
 		/* file */
 		if (privdir.type.gen.attribute & FAT_ATTR_ARCHIVE)
 			break;
@@ -844,19 +840,20 @@ fatdirent_find_entry(fatfs_t *pfatfs, struct fatdirent *pdirent,
                      fatblock_t *pblock,
                      const wchar_t *pwszname)
 {
-
-	pfatfs->errnum = FAT_ERR_NOENT;
 	/* search every entry from fatblock_t */
 	while (!fatdirent_read_from_block(pfatfs, pdirent, pblock)) {
 		/* compare name */
 		if (!wcsncmp(pdirent->d_name, pwszname, sizeof(pdirent->d_name))) {
-			/* entry found */
-			pfatfs->errnum = FAT_ERR_SUCCESS;
+			/* entry found, check the fat chain */
+			if (check_cyclic_fat(pfatfs, pdirent->d_cluster)) {
+				pfatfs->errnum = FAT_ERR_LOOP;
+				return -1;
+			}
+
 			return 0;
 		}
 	}
 
-	/* not found */
 	return -1;
 }
 
@@ -990,6 +987,12 @@ fatfs_parse_bpb(fatfs_t *pfatfs)
 		if (((fatclus_t)bpb.specific.fat_32.root_cluster < 2) ||
 			((fatclus_t)bpb.specific.fat_32.root_cluster > pfatfs->max_cluster_num))
 			return -1;
+
+		/* check the fat chain (root) */
+		if (check_cyclic_fat(pfatfs, bpb.specific.fat_32.root_cluster)) {
+			pfatfs->errnum = FAT_ERR_LOOP;
+			return -1;
+		}
 
 		pfatfs->root_dir_start.cluster = bpb.specific.fat_32.root_cluster;
 		pfatfs->root_dir_start.curoff = fatfs_clus2off(pfatfs,

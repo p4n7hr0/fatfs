@@ -66,6 +66,7 @@ enum {
 	FAT_ERR_MAXSIZE,      /* read/write size is above UINT_MAX */
 	FAT_ERR_FULLDISK,     /* disk is full */
 	FAT_ERR_IO,           /* I/O error */
+	FAT_ERR_LOOP,         /* there is a loop in the FAT chain */
 	FAT_ERR_NOTIMPL,      /* function is not implemented */
 };
 
