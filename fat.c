@@ -828,10 +828,15 @@ fatdirent_read_from_block(fatfs_t *pfatfs, struct fatdirent *pdirent,
 	pdirent->d_type = (privdir.type.gen.attribute & FAT_ATTR_DIRECTORY) ?
 		FAT_TYPE_DIRECTORY : FAT_TYPE_ARCHIVE;
 
-	/* load long name, if err use 8dot3 */
-	if (fatdirent_load_lfn(pfatfs, pdirent, pblock))
-		fatdirent_load_lfn_from_8dot3(pdirent, &privdir);
+	/* load long name, skip '.', '..' */
+	if (memcmp(privdir.type.gen.name_8dot3, ". ", 2) &&
+		memcmp(privdir.type.gen.name_8dot3, ".. ", 3)) {
+		if (!fatdirent_load_lfn(pfatfs, pdirent, pblock))
+			return 0;
+	}
 
+	/* use 8dot3 */
+	fatdirent_load_lfn_from_8dot3(pdirent, &privdir);
 	return 0;
 }
 
