@@ -24,7 +24,7 @@ test_writefile(fatfs_t *pfatfs, const wchar_t *filepath)
 		return -1;
 
 	if (fat_fseek(pfatfile, 4096*2, FAT_SEEK_END)) {
-		fprintf(stderr, "fat_get_filesize: fat_fseek: error=%d\n",
+		fprintf(stderr, "test_writefile: fat_fseek: error=%d\n",
 		        fat_error(pfatfs));
 
 		fat_fclose(pfatfile);
