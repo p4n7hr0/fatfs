@@ -39,6 +39,7 @@ test_writefile(fatfs_t *pfatfs, const wchar_t *filepath)
 
 	fprintf(stderr, "fat_fwrite: n=%zu\n", nwrite);
 	fprintf(stderr, "fat_ftell=%lld\n", fat_ftell(pfatfile));
+	fat_fclose(pfatfile);
 	return 0;
 }
 
