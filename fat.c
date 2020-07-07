@@ -55,7 +55,8 @@ typedef struct _fatblock {
 	fatoff_t curoff;
 	fatoff_t endoff;
 	fatclus_t cluster;
-	fatoff_t index;   /* zero based */
+	fatclus_t clsinit; /* first cluster on chain */
+	fatoff_t index;    /* zero based */
 } fatblock_t;
 
 /* fatfs_t */
@@ -73,7 +74,7 @@ struct fatfs {
 	fatoff_t fat_size_bytes;
 	uint8_t  fat_num;
 
-	fatblock_t root_dir_start;
+	fatblock_t root_block;
 	fatoff_t data_start_off;
 
 	fatclus_t max_cluster_num;
@@ -91,7 +92,6 @@ struct fatfs {
 struct fatdir {
 	fatfs_t *pfatfs;
 	fatoff_t privoff;
-	fatclus_t cluster;
 	fatblock_t block;
 	long position;
 	struct fatdirent data;
@@ -101,7 +101,6 @@ struct fatdir {
 struct fatfile {
 	fatfs_t *pfatfs;
 	fatoff_t privoff;
-	fatclus_t cluster;
 	fatblock_t block;
 	fatoff_t filesize;
 	fatoff_t oversize;
@@ -650,6 +649,72 @@ privdirent_read_from_block(fatfs_t *pfatfs, struct privdirent *pprivdir,
 	return 0;
 }
 
+static void
+fatfs_fatblock_init(fatfs_t *pfatfs, fatblock_t *pblock, fatclus_t clsfirst)
+{
+	pblock->curoff = fatfs_clus2off(pfatfs, clsfirst);
+	pblock->endoff = pblock->curoff + pfatfs->bytes_per_cluster;
+	pblock->cluster = clsfirst;
+	pblock->clsinit = clsfirst;
+	pblock->index = 0;
+}
+
+static inline fatoff_t
+fatfs_block_get_startoff(fatfs_t *pfatfs, fatblock_t *pblock)
+{
+	fatoff_t startoff = pblock->endoff - pfatfs->bytes_per_cluster;
+
+	/* root directory for fat12/16 */
+	if ((pblock->cluster == INVALID_CLUSTER) &&
+		(pblock->index == 0)) {
+		startoff = pfatfs->fat_first_off;
+		startoff += pfatfs->fat_num * pfatfs->fat_size_bytes;
+	}
+
+	return startoff;
+}
+
+static int
+fatfs_decrement_block_offset(fatfs_t *pfatfs, fatblock_t *pblock, fatoff_t off)
+{
+	fatoff_t startoff = fatfs_block_get_startoff(pfatfs, pblock);
+
+	/* max decrement is one block */
+	if (off > pfatfs->bytes_per_cluster)
+		return -1;
+	/* if block is on chain, initial cluster must be valid */
+	if (pblock->clsinit != INVALID_CLUSTER) {
+		if (!fatfs_isvalid_cluster(pfatfs, pblock->clsinit))
+			return -1;
+	}
+
+	/* offset in the previous block */
+	if ((pblock->curoff - off) < startoff) {
+		if (pblock->index == 0)
+			return -1;
+
+		/* find the previous cluster number */
+		fatclus_t clsnum = pblock->clsinit;
+		for (fatoff_t i = 0; i < pblock->index - 1; i++) {
+			clsnum = fatfs_safe_readfat(pfatfs, clsnum);
+			if (clsnum == INVALID_CLUSTER)
+				return -1;
+		}
+
+		off += startoff - pblock->curoff;
+
+		/* update block */
+		pblock->index--;
+		pblock->cluster = clsnum;
+		pblock->endoff = fatfs_clus2off(pfatfs, clsnum);
+		pblock->endoff += pfatfs->bytes_per_cluster;
+		pblock->curoff = pblock->endoff;
+	}
+
+	pblock->curoff -= off;
+	return 0;
+}
+
 /* write privdirent to fatblock_t */
 /*
 static int
@@ -670,11 +735,7 @@ check_cyclic_fat(fatfs_t *pfatfs, fatclus_t first_cluster)
 	fatblock_t block;
 	fatclus_t saved_cluster = 0;
 
-	/* first block */
-	block.cluster = first_cluster;
-	block.curoff = fatfs_clus2off(pfatfs, first_cluster);
-	block.endoff = block.curoff + pfatfs->bytes_per_cluster;
-	block.index = 0;
+	fatfs_fatblock_init(pfatfs, &block, first_cluster);
 
 	/* follow every cluster number in the FAT chain */
 	for (fatclus_t i = 0; i <= pfatfs->max_cluster_num; i++) {
@@ -713,7 +774,8 @@ fatdirent_load_lfn(fatfs_t *pfatfs, struct fatdirent *pdirent,
 
 	/* retrieve lfn entries */
 	for (size_t ord = 1; ord <= max_lfn_entries; ord++) {
-		block.curoff -= 64;
+		if (fatfs_decrement_block_offset(pfatfs, &block, 64))
+			return -1;
 
 		/* read entry */
 		if(privdirent_read_from_block(pfatfs, &privdir, &block))
@@ -782,6 +844,7 @@ static int
 fatdirent_read_from_block(fatfs_t *pfatfs, struct fatdirent *pdirent,
                           fatblock_t *pblock)
 {
+	fatblock_t block;
 	struct privdirent privdir;
 	fatclus_t first_cluster = 0;
 
@@ -822,7 +885,12 @@ fatdirent_read_from_block(fatfs_t *pfatfs, struct fatdirent *pdirent,
 			break;
 	}
 
-	pdirent->d_privoff = pblock->curoff - 32;
+	/* copy block before decrement */
+	memcpy(&block, pblock, sizeof(fatblock_t));
+	if (fatfs_decrement_block_offset(pfatfs, &block, 32))
+		return -1;
+
+	pdirent->d_privoff = block.curoff;
 	pdirent->d_cluster = first_cluster;
 	pdirent->d_size = privdir.type.gen.file_size;
 	pdirent->d_type = (privdir.type.gen.attribute & FAT_ATTR_DIRECTORY) ?
@@ -999,12 +1067,8 @@ fatfs_parse_bpb(fatfs_t *pfatfs)
 			return -1;
 		}
 
-		pfatfs->root_dir_start.cluster = bpb.specific.fat_32.root_cluster;
-		pfatfs->root_dir_start.curoff = fatfs_clus2off(pfatfs,
-			bpb.specific.fat_32.root_cluster);
-		pfatfs->root_dir_start.endoff = pfatfs->root_dir_start.curoff +
-			pfatfs->bytes_per_cluster;
-		pfatfs->root_dir_start.index = 0;
+		fatfs_fatblock_init(pfatfs, &pfatfs->root_block,
+		                    bpb.specific.fat_32.root_cluster);
 
 		memcpy(label, bpb.specific.fat_32.label, sizeof(label) - 1);
 
@@ -1015,18 +1079,20 @@ fatfs_parse_bpb(fatfs_t *pfatfs)
 		pfatfs->readfat = fatfs_read_fat12;
 		pfatfs->readfatbuf = readfatbuf_12;
 
+		/* only case where the block is outside the file allocation table */
 		pfatfs->fat_size_bytes = bpb.sectors_per_fat_16 * bpb.bytes_per_sector;
-		pfatfs->root_dir_start.cluster = INVALID_CLUSTER;
-		pfatfs->root_dir_start.curoff = pfatfs->fat_first_off  +
+		pfatfs->root_block.cluster = INVALID_CLUSTER;
+		pfatfs->root_block.clsinit = INVALID_CLUSTER;
+		pfatfs->root_block.curoff = pfatfs->fat_first_off  +
 			(pfatfs->fat_num * pfatfs->fat_size_bytes);
-		pfatfs->root_dir_start.endoff = pfatfs->root_dir_start.curoff +
+		pfatfs->root_block.endoff = pfatfs->root_block.curoff +
 			bpb.num_root_entries * 32;
-		pfatfs->root_dir_start.index = 0;
-		pfatfs->data_start_off = pfatfs->root_dir_start.endoff;
+		pfatfs->root_block.index = 0;
+		pfatfs->data_start_off = pfatfs->root_block.endoff;
 
 		/* validate root dir offset */
-		if ((pfatfs->root_dir_start.curoff > pfatfs->volsize) ||
-			(pfatfs->root_dir_start.endoff >= pfatfs->volsize))
+		if ((pfatfs->root_block.curoff > pfatfs->volsize) ||
+			(pfatfs->root_block.endoff >= pfatfs->volsize))
 			return -1;
 
 		pfatfs->max_cluster_num = ((pfatfs->volsize - pfatfs->data_start_off) /
@@ -1143,8 +1209,8 @@ fat_opendir(fatfs_t *pfatfs, const wchar_t *path)
 	}
 
 	/* copy root dir block */
-	memcpy(&block, &pfatfs->root_dir_start, sizeof(block));
-	privoff = pfatfs->root_dir_start.curoff;
+	memcpy(&block, &pfatfs->root_block, sizeof(block));
+	privoff = pfatfs->root_block.curoff;
 
 	/* copy the name */
 	pwsz = wcsdup(path);
@@ -1180,10 +1246,7 @@ fat_opendir(fatfs_t *pfatfs, const wchar_t *path)
 		}
 
 		/* dir found, update block */
-		block.curoff = fatfs_clus2off(pfatfs, fatdirent.d_cluster);
-		block.endoff = block.curoff + pfatfs->bytes_per_cluster;
-		block.cluster = fatdirent.d_cluster;
-		block.index = 0;
+		fatfs_fatblock_init(pfatfs, &block, fatdirent.d_cluster);
 
 		privoff = fatdirent.d_privoff;
 		curdir = nextslash + 1;
@@ -1199,7 +1262,6 @@ fat_opendir(fatfs_t *pfatfs, const wchar_t *path)
 	/* set values */
 	pfatdir->pfatfs = pfatfs;
 	pfatdir->privoff = privoff;
-	pfatdir->cluster = block.cluster;
 	pfatdir->position = 0;
 	memcpy(&pfatdir->block, &block, sizeof(block));
 	pfatfs->errnum = FAT_ERR_SUCCESS;
@@ -1260,19 +1322,18 @@ fat_rewinddir(fatdir_t *pfatdir)
 		return;
 
 	pfatdir->position = 0;
-	pfatdir->block.cluster = pfatdir->cluster;
+	pfatdir->block.cluster = pfatdir->block.clsinit;
 	pfatdir->block.index = 0;
 
 	/* generic rewind */
 	if (fatfs_isvalid_cluster(pfatdir->pfatfs, pfatdir->block.cluster)) {
-		pfatdir->block.curoff = fatfs_clus2off(pfatdir->pfatfs,pfatdir->cluster);
-		pfatdir->block.endoff = pfatdir->block.curoff;
-		pfatdir->block.endoff += pfatdir->pfatfs->bytes_per_cluster;
+		fatfs_fatblock_init(pfatdir->pfatfs, &pfatdir->block,
+		                    pfatdir->block.clsinit);
 		return;
 	}
 
 	/* rewind on fat12,fat16 root dir */
-	memcpy(&pfatdir->block,&pfatdir->pfatfs->root_dir_start,sizeof(fatblock_t));
+	memcpy(&pfatdir->block, &pfatdir->pfatfs->root_block, sizeof(fatblock_t));
 }
 
 void
@@ -1412,12 +1473,7 @@ fatfs_fatfile_expand(fatfile_t *pfatfile, fatoff_t length)
 		                                    newclus))
 			return -1;
 
-		pfatfile->cluster = newclus;
-		pfatfile->block.cluster = newclus;
-		pfatfile->block.curoff = fatfs_clus2off(pfatfile->pfatfs, newclus);
-		pfatfile->block.endoff = pfatfile->block.curoff;
-		pfatfile->block.endoff += pfatfile->pfatfs->bytes_per_cluster;
-		pfatfile->block.index = 0;
+		fatfs_fatblock_init(pfatfile->pfatfs, &pfatfile->block, newclus);
 	}
 
 	/* preserve the caller block */
@@ -1473,8 +1529,9 @@ fatfs_fatfile_shrink(fatfile_t *pfatfile, fatoff_t length)
 	/* restore block */
 	memcpy(&pfatfile->block, &block, sizeof(block));
 	if (length == 0) {
-		pfatfile->cluster = INVALID_CLUSTER;
+		/* invalidate */
 		pfatfile->block.cluster = INVALID_CLUSTER;
+		pfatfile->block.clsinit = INVALID_CLUSTER;
 		pfatfile->block.curoff = 0;
 		pfatfile->block.endoff = 0;
 		pfatfile->block.index = 0;
@@ -1572,22 +1629,19 @@ fat_fopen(fatfs_t *pfatfs, const wchar_t *path, const char *mode)
 				goto _free_and_ret;
 			}
 
-			/* fill the file structure */
+			/* init the file structure */
 			pfatfile->pfatfs = pfatfs;
 			pfatfile->privoff = dp->d_privoff;
-			pfatfile->cluster = dp->d_cluster;
-			pfatfile->block.cluster = dp->d_cluster;
-			pfatfile->block.index = 0;
+			pfatfile->block.cluster = INVALID_CLUSTER;
+			pfatfile->block.clsinit = INVALID_CLUSTER;
 			pfatfile->mode = oflag_mode;
 			pfatfile->filesize = dp->d_size;
 			pfatfile->oversize = 0;
 
 			/* if file is not empty, it has a valid block */
-			if (dp->d_size) {
-				pfatfile->block.curoff = fatfs_clus2off(pfatfs, dp->d_cluster);
-				pfatfile->block.endoff = pfatfile->block.curoff;
-				pfatfile->block.endoff += pfatfs->bytes_per_cluster;
-			}
+			if (dp->d_size)
+				fatfs_fatblock_init(pfatfile->pfatfs, &pfatfile->block,
+				                    dp->d_cluster);
 		}
 	}
 
@@ -1749,12 +1803,8 @@ fat_fseek(fatfile_t *pfatfile, fatoff_t offset, int whence)
 	/* ensure block is on cluster chain */
 	if (pfatfile->block.cluster != INVALID_CLUSTER) {
 		/* rewind file */
-		pfatfile->block.curoff = fatfs_clus2off(pfatfile->pfatfs,
-		                                        pfatfile->cluster);
-		pfatfile->block.endoff = pfatfile->block.curoff;
-		pfatfile->block.endoff += pfatfile->pfatfs->bytes_per_cluster;
-		pfatfile->block.cluster = pfatfile->cluster;
-		pfatfile->block.index = 0;
+		fatfs_fatblock_init(pfatfile->pfatfs, &pfatfile->block,
+		                    pfatfile->block.clsinit);
 		pfatfile->oversize = 0;
 
 		/* advance blocks */
