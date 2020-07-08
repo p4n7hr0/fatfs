@@ -20,6 +20,8 @@
 #include <string.h>
 #include <getopt.h>
 #include <limits.h>
+#include <locale.h>
+#include <inttypes.h>
 
 #define PROGRAM_NAME "parsefat"
 #define PROGRAM_VERSION "0.1"
@@ -51,9 +53,9 @@ parsefat_read_directory(fatdir_t *pfatdir)
 
 	fprintf(stdout, "%-35s %-11s %s\n", "[name]", "[type]", "[size]");
 	while ((dp = fat_readdir(pfatdir))) {
-		fprintf(stdout, "%-35ls %-11s  %ld\n", dp->d_name,
+		fprintf(stdout, "%-35ls %-11s  %" PRId64 "\n", dp->d_name,
 			(dp->d_type == FAT_TYPE_ARCHIVE) ? "file" : "directory",
-			(long) dp->d_size);
+			dp->d_size);
 	}
 }
 
@@ -130,6 +132,7 @@ int main(int argc, char *argv[])
 		{ NULL     , 0                , NULL, 0               }
 	};
 
+	setlocale(LC_CTYPE, "");
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 			case 'h':
