@@ -1,6 +1,6 @@
 
 CC           := gcc
-CFLAGS       := -Wall -Wextra -pedantic -MMD -MP -I. -Wno-unused-parameter
+CFLAGS       := -Wall -Wextra -pedantic -MMD -MP -I.
 MKFSFAT      := $(shell which mkfs.fat)
 VALGRIND     := $(shell which valgrind)
 
