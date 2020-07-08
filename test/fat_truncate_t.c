@@ -7,6 +7,7 @@
 #include "fat.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #define FIRSTFILE  L"/FIRST.txt"
 #define SECONDFILE L"Second_File_Using_Long_Name.txt"
@@ -31,7 +32,7 @@ static int
 test_truncate(fatfs_t *pfatfs, const wchar_t *filepath)
 {
 
-	fprintf(stderr, "%ls: filesize=%lld\n", filepath,
+	fprintf(stderr, "%ls: filesize=%" PRId64 "\n", filepath,
 	        fat_get_filesize(pfatfs, filepath));
 
 	/* truncate */
@@ -40,7 +41,7 @@ test_truncate(fatfs_t *pfatfs, const wchar_t *filepath)
 		return -1;
 	}
 
-	fprintf(stderr, "%ls: filesize=%lld\n", filepath,
+	fprintf(stderr, "%ls: filesize=%" PRId64 "\n", filepath,
 	        fat_get_filesize(pfatfs, filepath));
 
 	/* truncate */
@@ -49,7 +50,7 @@ test_truncate(fatfs_t *pfatfs, const wchar_t *filepath)
 		return -1;
 	}
 
-	fprintf(stderr, "%ls: filesize=%lld\n", filepath,
+	fprintf(stderr, "%ls: filesize=%" PRId64 "\n", filepath,
 	        fat_get_filesize(pfatfs, filepath));
 
 	/* noent */

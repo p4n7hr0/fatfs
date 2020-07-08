@@ -7,6 +7,7 @@
 #include "fat.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 struct seekpos {
 	fatoff_t off;
@@ -41,7 +42,7 @@ test_seekfile(fatfs_t *pfatfs)
 
 	/* test valid seek */
 	for (size_t i = 0; i < sizeof(validlist)/sizeof(validlist[0]); i++) {
-		fprintf(stderr, "fat_fseek(%lld, %d): ", validlist[i].off,
+		fprintf(stderr, "fat_fseek(%" PRId64 ", %d): ", validlist[i].off,
 		        validlist[i].whence);
 
 		if (fat_fseek(pfatfile, validlist[i].off, validlist[i].whence)) {
@@ -50,12 +51,12 @@ test_seekfile(fatfs_t *pfatfs)
 			goto _close_and_quit;
 		}
 
-		fprintf(stderr, "fat_ftell(pfatfile)=%lld\n", fat_ftell(pfatfile));
+		fprintf(stderr, "fat_ftell(pfatfile)=%" PRId64 "\n", fat_ftell(pfatfile));
 	}
 
 	/* test invalid seek */
 	for (size_t i = 0; i < sizeof(invalidlist)/sizeof(invalidlist[0]); i++) {
-		fprintf(stderr, "fat_fseek(%lld, %d): ", invalidlist[i].off,
+		fprintf(stderr, "fat_fseek(%" PRId64 ", %d): ", invalidlist[i].off,
 		        invalidlist[i].whence);
 
 		if (fat_fseek(pfatfile,invalidlist[i].off,invalidlist[i].whence) != -1){
@@ -63,7 +64,7 @@ test_seekfile(fatfs_t *pfatfs)
 			goto _close_and_quit;
 		}
 
-		fprintf(stderr, "error=%d fat_ftell(pfatfile)=%lld\n",
+		fprintf(stderr, "error=%d fat_ftell(pfatfile)=%" PRId64 "\n",
 		        fat_error(pfatfs), fat_ftell(pfatfile));
 	}
 

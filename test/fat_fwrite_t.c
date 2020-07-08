@@ -7,6 +7,7 @@
 #include "fat.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #define FIRSTFILE  L"/FIRST.txt"
 #define SECONDFILE L"Second_File_Using_Long_Name.txt"
@@ -38,7 +39,7 @@ test_writefile(fatfs_t *pfatfs, const wchar_t *filepath)
 	}
 
 	fprintf(stderr, "fat_fwrite: n=%zu\n", nwrite);
-	fprintf(stderr, "fat_ftell=%lld\n", fat_ftell(pfatfile));
+	fprintf(stderr, "fat_ftell=%" PRId64 "d\n", fat_ftell(pfatfile));
 	fat_fclose(pfatfile);
 	return 0;
 }
