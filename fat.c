@@ -390,7 +390,7 @@ readfatbuf_12(void *data, size_t size, fatclus_t cluster)
 	int16_t value;
 	int8_t *d = (int8_t *) data;
 
-	if (((fatoff_t) size) < 0)
+	if (((ssize_t) size) < 0)
 		return INVALID_CLUSTER;
 
 	if (cluster + (cluster / 2) > (fatoff_t) size)
@@ -406,7 +406,7 @@ readfatbuf_16(void *data, size_t size, fatclus_t cluster)
 {
 	int16_t *d = (int16_t *) data;
 
-	if (((fatoff_t) size) < 0)
+	if (((ssize_t) size) < 0)
 		return INVALID_CLUSTER;
 
 	if ((cluster + 1) * 2 > (fatoff_t) size)
@@ -420,7 +420,7 @@ readfatbuf_32(void *data, size_t size, fatclus_t cluster)
 {
 	int32_t *d = (int32_t *) data;
 
-	if (((fatoff_t) size) < 0)
+	if (((ssize_t) size) < 0)
 		return INVALID_CLUSTER;
 
 	if ((cluster + 1) * 4 > (fatoff_t) size)
