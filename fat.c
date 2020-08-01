@@ -1346,6 +1346,8 @@ int
 fat_mkdir(fatfs_t *pfatfs, const wchar_t *path)
 {
 	// TODO: implement
+	fprintf(stderr, "fat_mkdir(%p, %p): not implemented\n",
+	        (void *) pfatfs, (void *) path);
 	return FAT_ERR_NOTIMPL;
 }
 
@@ -1353,6 +1355,8 @@ int
 fat_rmdir(fatfs_t *pfatfs, const wchar_t *path)
 {
 	// TODO: implement
+	fprintf(stderr, "fat_rmdir(%p, %p): not implemented\n",
+	        (void *) pfatfs, (void *) path);
 	return FAT_ERR_NOTIMPL;
 }
 
@@ -1885,6 +1889,8 @@ fat_truncate(fatfs_t *pfatfs, const wchar_t *filepath, fatoff_t length)
 int
 fat_unlink(fatfs_t *pfatfs, const wchar_t *path)
 {
+	fprintf(stderr, "fat_unlink(%p, %p): not implemented\n",
+	        (void *) pfatfs, (void *) path);
 	return FAT_ERR_NOTIMPL;
 }
 
